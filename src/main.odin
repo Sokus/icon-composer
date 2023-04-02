@@ -74,7 +74,7 @@ main :: proc() {
                 if icon_count < MAX_ICON_COUNT {
                     textures[icon_count] = raylib.LoadTexture(dropped_files.paths[i])
                     texture_filter: raylib.TextureFilter = .BILINEAR if input.filtering else .POINT
-                    //raylib.SetTextureFilter(textures[icon_count], texture_filter)
+                    raylib.SetTextureFilter(textures[icon_count], texture_filter)
                     filepaths[icon_count] = strings.clone_from_cstring(dropped_files.paths[i])
                     icon_count += 1
                 }
@@ -125,7 +125,7 @@ main :: proc() {
                 crop_rect := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - input.image_size.y), f32(input.image_size.x), f32(input.image_size.y) }
                 raylib.ImageCrop(&image, crop_rect)
                 raylib.ImageFlipVertical(&image)
-                raylib.ExportImage(image, "result.jpg")
+                raylib.ExportImage(image, "result.png")
                 raylib.UnloadImage(image)
             }
 
