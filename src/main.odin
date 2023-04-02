@@ -12,7 +12,7 @@ import mu "vendor:microui"
 
 main :: proc() {
     CONFIG_PANEL_WIDTH: i32 : 350
-    CONFIG_PANEL_MIN_HEIGHT: i32 : 220
+    CONFIG_PANEL_MIN_HEIGHT: i32 : 540
     PREVIEW_AREA_MIN_WIDTH: i32 : 450
     WINDOW_MIN_WIDTH: i32 : PREVIEW_AREA_MIN_WIDTH + CONFIG_PANEL_WIDTH
     WINDOW_MIN_HEIGHT: i32 : CONFIG_PANEL_MIN_HEIGHT
@@ -21,7 +21,7 @@ main :: proc() {
     MAX_RENDER_WIDTH :: 10000
     MAX_RENDER_HEIGHT :: 10000
 
-    raylib.SetTraceLogLevel(raylib.TraceLogLevel.ERROR)
+    raylib.SetTraceLogLevel(raylib.TraceLogLevel.WARNING)
     raylib.InitWindow(max(WINDOW_MIN_WIDTH, 960), max(WINDOW_MIN_HEIGHT, 540), "Icon Composer")
     raylib.SetWindowState({.WINDOW_RESIZABLE})
     raylib.SetWindowMinSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
@@ -36,6 +36,7 @@ main :: proc() {
 
     input: struct {
         tile_size: f32,
+        filtering: bool,
         spacing: f32,
         cell_count: linalg.Vector2f32,
         rotation: f32,
@@ -47,9 +48,10 @@ main :: proc() {
         image_size_x_text_len: int,
         image_size_y_text_buf: [64]u8,
         image_size_y_text_len: int,
-        image_size: linalg.Vector2f32,
+        image_size: [2]uint,
     }
     input.tile_size = 50
+    input.filtering = true
     input.cell_count = { 4, 4 }
     input.image_size = { 256, 256 }
     image_size_default := "256"
@@ -71,6 +73,8 @@ main :: proc() {
             for i in 0..<dropped_files.count {
                 if icon_count < MAX_ICON_COUNT {
                     textures[icon_count] = raylib.LoadTexture(dropped_files.paths[i])
+                    texture_filter: raylib.TextureFilter = .BILINEAR if input.filtering else .POINT
+                    //raylib.SetTextureFilter(textures[icon_count], texture_filter)
                     filepaths[icon_count] = strings.clone_from_cstring(dropped_files.paths[i])
                     icon_count += 1
                 }
@@ -81,12 +85,12 @@ main :: proc() {
         mu.begin(ctx)
 
         config_label := "Config"
-        config_opts := mu.Options{.NO_RESIZE, .NO_CLOSE, .NO_TITLE, .NO_SCROLL}
+        config_opts := mu.Options{.NO_RESIZE, .NO_CLOSE, .NO_TITLE}
         config_container := mu.get_container(ctx, config_label, config_opts)
         mu_move_container(config_container, raylib.GetScreenWidth() - CONFIG_PANEL_WIDTH, 0)
         if mu.window(ctx, config_label, { 0, 0, CONFIG_PANEL_WIDTH, CONFIG_PANEL_MIN_HEIGHT }, config_opts) {
         mu.layout_row(ctx, { 60, 200 + ctx.style.spacing })
-            config_width_no_padding := CONFIG_PANEL_WIDTH - 2*ctx.style.padding
+            config_width_no_padding := CONFIG_PANEL_WIDTH - 2*ctx.style.padding - ctx.style.scrollbar_size
             label_column_width: i32 = 60
             signle_column_width: i32 = config_width_no_padding - label_column_width - ctx.style.spacing
             double_column_width: i32 = (config_width_no_padding - label_column_width - 2*ctx.style.spacing)
@@ -101,25 +105,38 @@ main :: proc() {
 
                 image_size_x, image_size_x_ok := strconv.parse_uint(string(input.image_size_x_text_buf[:input.image_size_x_text_len]))
                 if image_size_x > MAX_RENDER_WIDTH do image_size_x_ok = false
-                if image_size_x_ok do input.image_size.x = f32(image_size_x)
+                if image_size_x_ok do input.image_size.x = image_size_x
                 if !image_size_x_ok do ctx.style.colors[.TEXT] = mu_err_color
                 mu.textbox(ctx, input.image_size_x_text_buf[:], &input.image_size_x_text_len)
                 ctx.style.colors[.TEXT] = mu_text_color
 
                 image_size_y, image_size_y_ok := strconv.parse_uint(string(input.image_size_y_text_buf[:input.image_size_y_text_len]))
                 if image_size_y > MAX_RENDER_HEIGHT do image_size_y_ok = false
-                if image_size_y_ok do input.image_size.y = f32(image_size_y)
+                if image_size_y_ok do input.image_size.y = image_size_y
                 if !image_size_y_ok do ctx.style.colors[.TEXT] = mu_err_color
                 mu.textbox(ctx, input.image_size_y_text_buf[:], &input.image_size_y_text_len)
                 ctx.style.colors[.TEXT] = mu_text_color
             }
+
+            mu.layout_row(ctx, { config_width_no_padding })
+            if .SUBMIT in mu.button(ctx, "Save in working directory") {
+                image := raylib.LoadImageFromTexture(render_texture.texture)
+
+                crop_rect := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - input.image_size.y), f32(input.image_size.x), f32(input.image_size.y) }
+                raylib.ImageCrop(&image, crop_rect)
+                raylib.ImageFlipVertical(&image)
+                raylib.ExportImage(image, "result.jpg")
+                raylib.UnloadImage(image)
+            }
+
+            mu.draw_rect(ctx, mu.layout_next(ctx), {})
 
             mu.layout_row(ctx, { label_width, signle_column_width })
             {
                 mu.text(ctx, "Tile size:")
                 mu.slider(ctx, &input.tile_size, 16.0, 1024.0, 1.0, "%.0f")
                 mu.text(ctx, "Spacing:")
-                mu.slider(ctx, &input.spacing, 0.0, 128.0, 1.0, "%.0f")
+                mu.slider(ctx, &input.spacing, 0.0, 256.0, 1.0, "%.0f")
             }
 
             mu.layout_row(ctx, { label_width, double_column_width/2, double_column_width/2 })
@@ -137,6 +154,10 @@ main :: proc() {
 
             mu.layout_row(ctx, { config_width_no_padding })
             {
+                if .CHANGE in mu.checkbox(ctx, "Texture filtering (recommended)", &input.filtering) {
+                    texture_filter: raylib.TextureFilter = .BILINEAR if input.filtering else .POINT
+                    for i in 0..<icon_count do raylib.SetTextureFilter(textures[i], texture_filter)
+                }
                 mu.checkbox(ctx, "Shuffle", &input.should_randomize)
             }
 
@@ -153,32 +174,46 @@ main :: proc() {
                 rand_seed = rand.uint64()
             }
 
-            mu.layout_row(ctx, { config_width_no_padding })
-            if .SUBMIT in mu.button(ctx, "Save in working directory") {
-                image := raylib.LoadImageFromTexture(render_texture.texture)
-                image_size := linalg.round(input.image_size)
+            mu.draw_rect(ctx, mu.layout_next(ctx), {})
 
-                crop_rect := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - image_size.y), image_size.x, image_size.y }
-                raylib.ImageCrop(&image, crop_rect)
-                raylib.ImageFlipVertical(&image)
-                raylib.ExportImage(image, "result.png")
-                raylib.UnloadImage(image)
+            mu.layout_row(ctx, { signle_column_width, label_width })
+            {
+                if icon_count > 0 {
+                    mu.text(ctx, "Files:");
+                    mu.draw_rect(ctx, mu.layout_next(ctx), {})
+                }
+
+                for i in 0..<icon_count {
+                    i := i
+                    mu.push_id_rawptr(ctx, &i, size_of(i))
+                    filepath := filepaths[i]
+                    mu.text(ctx, filepath[max(0, len(filepath)-100):])
+                    if .SUBMIT in mu.button(ctx, "", .CLOSE) {
+                        delete_string(filepaths[i])
+                        raylib.UnloadTexture(textures[i])
+                        for j in i..<icon_count-1 {
+                            filepaths[j] = filepaths[j+1]
+                            textures[j] = textures[j+1]
+                        }
+                        icon_count -= 1
+                    }
+                    mu.pop_id(ctx)
+                }
             }
         }
         mu.end(ctx)
 
-        image_size := linalg.round(input.image_size)
         tile_size := math.round(input.tile_size)
         cell_count := linalg.round(input.cell_count)
         spacing := math.round(input.spacing)
         raylib.BeginTextureMode(render_texture)
         {
             raylib.ClearBackground({})
-            raylib.BeginScissorMode(0, 0, i32(image_size.x), i32(image_size.y))
+            raylib.BeginScissorMode(0, 0, i32(input.image_size.x), i32(input.image_size.y))
             {
                 raylib.rlPushMatrix()
                 content_size := cell_count*tile_size + (cell_count-1)*spacing
-                raylib.rlTranslatef(image_size.x/2.0, image_size.y/2.0, 0.0)
+                raylib.rlTranslatef(f32(input.image_size.x)/2.0, f32(input.image_size.y)/2.0, 0.0)
                 raylib.rlRotatef(input.rotation, 0.0, 0.0, 1.0)
                 raylib.rlTranslatef(-content_size.x/2.0, -content_size.y/2.0, 0.0)
                 if icon_count > 0 {
@@ -216,11 +251,11 @@ main :: proc() {
         raylib.BeginDrawing()
         {
             raylib.ClearBackground(raylib.Color{25, 25, 25, 255})
-            source := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - image_size.y), image_size.x, -image_size.y }
+            source := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - input.image_size.y), f32(input.image_size.x), -f32(input.image_size.y) }
 
             border := f32(2)
             available_space: [2]f32 = { f32(raylib.GetScreenWidth() - CONFIG_PANEL_WIDTH), f32(raylib.GetScreenHeight()) }
-            dest := raylib.Rectangle{ 0, 0, image_size.x, image_size.y }
+            dest := raylib.Rectangle{ 0, 0, f32(input.image_size.x), f32(input.image_size.y) }
             if dest.width > available_space.x {
                 size_reduction := available_space.x / dest.width
                 dest.width *= size_reduction
