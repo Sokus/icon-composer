@@ -75,7 +75,7 @@ mu_render :: proc(ctx: ^mu.Context) {
             x = f32(src.x), y = f32(src.y),
             width = f32(src.w), height = f32(src.h),
         }
-        rcolor: raylib.Color = { r = color.r, g = color.g, b = color.b, a = color.a }
+        rcolor: raylib.Color = { color.r, color.g, color.b, color.a }
 
         raylib.DrawTexturePro(texture, rsrc, dst^, {}, 0.0, rcolor)
     }
