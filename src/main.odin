@@ -38,7 +38,6 @@ main :: proc() {
         tile_size: f32,
         filtering: bool,
         spacing: f32,
-        cell_count: linalg.Vector2f32,
         rotation: f32,
         should_randomize: bool,
         should_sieve: bool,
@@ -52,7 +51,6 @@ main :: proc() {
     }
     input.tile_size = 50
     input.filtering = true
-    input.cell_count = { 4, 4 }
     input.image_size = { 256, 256 }
     image_size_default := "256"
     copy_slice(input.image_size_x_text_buf[:], transmute([]u8)image_size_default)
@@ -139,13 +137,6 @@ main :: proc() {
                 mu.slider(ctx, &input.spacing, 0.0, 256.0, 1.0, "%.0f")
             }
 
-            mu.layout_row(ctx, { label_width, double_column_width/2, double_column_width/2 })
-            {
-                mu.text(ctx, "Cell count:")
-                mu.slider(ctx, &input.cell_count.x, 1.0, 64.0, 1.0, "%.0f")
-                mu.slider(ctx, &input.cell_count.y, 1.0, 64.0, 1.0, "%.0f")
-            }
-
             mu.layout_row(ctx, { label_width, signle_column_width })
             {
                 mu.text(ctx, "Rotation:")
@@ -204,8 +195,15 @@ main :: proc() {
         mu.end(ctx)
 
         tile_size := math.round(input.tile_size)
-        cell_count := linalg.round(input.cell_count)
         spacing := math.round(input.spacing)
+        cell_count: linalg.Vector2f32
+        {
+            diagonal := linalg.vector_length(
+                linalg.Vector2f32{ f32(input.image_size.x), f32(input.image_size.y) }
+            )
+            min_cell_count := (diagonal + spacing) / (tile_size + spacing)
+            cell_count = linalg.Vector2f32{ linalg.ceil(min_cell_count), linalg.ceil(min_cell_count) }
+        }
         raylib.BeginTextureMode(render_texture)
         {
             raylib.ClearBackground({})
