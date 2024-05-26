@@ -2,13 +2,37 @@ package main
 
 import "core:math/rand"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:math"
 import "core:math/linalg"
 import "core:strconv"
+import "core:encoding/json"
 
 import "vendor:raylib"
 import mu "vendor:microui"
+
+Input :: struct {
+    image_size: [2]uint,
+    tile_size: f32,
+    filtering: bool,
+    spacing: f32,
+    rotation: f32,
+    should_sieve: bool,
+    sieve_percent: f32,
+    should_avoid_matching_neighbours_hv: bool,
+    should_avoid_matching_neighbours_diag: bool,
+}
+
+load_input :: proc(input: ^Input) {
+    file, read_ok := os.read_entire_file_from_filename("./icon_composer_settings.json")
+    if !read_ok do return
+    defer delete(file)
+    if j_err := json.unmarshal(file, input); j_err != nil {
+        fmt.println("Unable to parse info.json because of", j_err)
+        return
+    }
+}
 
 main :: proc() {
     CONFIG_PANEL_WIDTH: i32 : 350
@@ -34,32 +58,14 @@ main :: proc() {
     filepaths: [MAX_ICON_COUNT]string
     textures: [MAX_ICON_COUNT]raylib.Texture
 
-    input: struct {
-        tile_size: f32,
-        filtering: bool,
-        spacing: f32,
-        rotation: f32,
-        should_sieve: bool,
-        sieve_percent: f32,
-        should_avoid_matching_neighbours_hv: bool,
-        should_avoid_matching_neighbours_diag: bool,
-
-        image_size_x_text_buf: [64]u8,
-        image_size_x_text_len: int,
-        image_size_y_text_buf: [64]u8,
-        image_size_y_text_len: int,
-        image_size: [2]uint,
-    }
+    input: Input
     input.tile_size = 50
     input.filtering = true
     input.image_size = { 256, 256 }
-    image_size_default := "256"
-    copy_slice(input.image_size_x_text_buf[:], transmute([]u8)image_size_default)
-    input.image_size_x_text_len = len(image_size_default)
-    copy_slice(input.image_size_y_text_buf[:], transmute([]u8)image_size_default)
-    input.image_size_y_text_len = len(image_size_default)
     mu_err_color := mu.Color{255, 51, 51, 255}
     rand_seed: u64 = 0
+
+    load_input(&input)
 
     render_texture := raylib.LoadRenderTexture(MAX_RENDER_WIDTH, MAX_RENDER_HEIGHT)
 
@@ -102,18 +108,32 @@ main :: proc() {
 
                 mu_text_color := ctx.style.colors[.TEXT]
 
-                image_size_x, image_size_x_ok := strconv.parse_uint(string(input.image_size_x_text_buf[:input.image_size_x_text_len]))
+                @(static) image_size_x_text_buf: [64]u8
+                @(static) image_size_x_text_len: int
+                @(static) image_size_y_text_buf: [64]u8
+                @(static) image_size_y_text_len: int
+                @(static) image_size_text_buf_initialized: bool = false
+
+                if (!image_size_text_buf_initialized) {
+                    image_size_x_string := fmt.bprint(image_size_x_text_buf[:], input.image_size.x)
+                    image_size_x_text_len = len(image_size_x_string)
+                    image_size_y_string := fmt.bprint(image_size_y_text_buf[:], input.image_size.y)
+                    image_size_y_text_len = len(image_size_y_string)
+                    image_size_text_buf_initialized = true
+                }
+
+                image_size_x, image_size_x_ok := strconv.parse_uint(string(image_size_x_text_buf[:image_size_x_text_len]))
                 if image_size_x > MAX_RENDER_WIDTH do image_size_x_ok = false
                 if image_size_x_ok do input.image_size.x = image_size_x
                 if !image_size_x_ok do ctx.style.colors[.TEXT] = mu_err_color
-                mu.textbox(ctx, input.image_size_x_text_buf[:], &input.image_size_x_text_len)
+                mu.textbox(ctx, image_size_x_text_buf[:], &image_size_x_text_len)
                 ctx.style.colors[.TEXT] = mu_text_color
 
-                image_size_y, image_size_y_ok := strconv.parse_uint(string(input.image_size_y_text_buf[:input.image_size_y_text_len]))
+                image_size_y, image_size_y_ok := strconv.parse_uint(string(image_size_y_text_buf[:image_size_y_text_len]))
                 if image_size_y > MAX_RENDER_HEIGHT do image_size_y_ok = false
                 if image_size_y_ok do input.image_size.y = image_size_y
                 if !image_size_y_ok do ctx.style.colors[.TEXT] = mu_err_color
-                mu.textbox(ctx, input.image_size_y_text_buf[:], &input.image_size_y_text_len)
+                mu.textbox(ctx, image_size_y_text_buf[:], &image_size_y_text_len)
                 ctx.style.colors[.TEXT] = mu_text_color
             }
 
@@ -124,7 +144,7 @@ main :: proc() {
                 crop_rect := raylib.Rectangle{ 0, f32(MAX_RENDER_HEIGHT - input.image_size.y), f32(input.image_size.x), f32(input.image_size.y) }
                 raylib.ImageCrop(&image, crop_rect)
                 raylib.ImageFlipVertical(&image)
-                raylib.ExportImage(image, "result.png")
+                raylib.ExportImage(image, "icon_composer_result.png")
                 raylib.UnloadImage(image)
             }
 
@@ -311,6 +331,10 @@ main :: proc() {
 
         free_all(context.temp_allocator)
     }
-
     raylib.CloseWindow()
+
+    data, err := json.marshal(input, {pretty=true})
+    defer delete(data)
+
+    raylib.SaveFileData("./icon_composer_settings.json", raw_data(data), i32(len(data)))
 }
