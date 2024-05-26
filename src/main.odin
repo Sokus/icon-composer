@@ -39,9 +39,10 @@ main :: proc() {
         filtering: bool,
         spacing: f32,
         rotation: f32,
-        should_randomize: bool,
         should_sieve: bool,
         sieve_percent: f32,
+        should_avoid_matching_neighbours_hv: bool,
+        should_avoid_matching_neighbours_diag: bool,
 
         image_size_x_text_buf: [64]u8,
         image_size_x_text_len: int,
@@ -143,21 +144,20 @@ main :: proc() {
                 mu.slider(ctx, &input.rotation, 0.0, 360.0, 0.1, "%.1f")
             }
 
-            mu.layout_row(ctx, { config_width_no_padding })
-            {
-                if .CHANGE in mu.checkbox(ctx, "Texture filtering (recommended)", &input.filtering) {
-                    texture_filter: raylib.TextureFilter = .BILINEAR if input.filtering else .POINT
-                    for i in 0..<icon_count do raylib.SetTextureFilter(textures[i], texture_filter)
-                }
-                mu.checkbox(ctx, "Shuffle", &input.should_randomize)
-            }
-
             mu.layout_row(ctx, { half_width, half_width })
             {
                 mu.checkbox(ctx, "Sieve", &input.should_sieve)
                 slider_opt: mu.Options = {.ALIGN_CENTER}
                 if !input.should_sieve do slider_opt += {.NO_INTERACT}
-                mu.slider(ctx, &input.sieve_percent, 0.0, 1.0, 0.1, "%.1f", slider_opt, )
+                mu.slider(ctx, &input.sieve_percent, 0.0, 1.0, 0.01, "%.2f", slider_opt, )
+            }
+
+            mu.layout_row(ctx, { half_width, half_width })
+            {
+                mu.text(ctx, "Avoid matching neighbours:")
+                mu.draw_rect(ctx, mu.layout_next(ctx), {})
+                mu.checkbox(ctx, "Horizontal/Vertical", &input.should_avoid_matching_neighbours_hv)
+                mu.checkbox(ctx, "Diagonal", &input.should_avoid_matching_neighbours_diag)
             }
 
             mu.layout_row(ctx, { config_width_no_padding })
@@ -204,6 +204,12 @@ main :: proc() {
             min_cell_count := (diagonal + spacing) / (tile_size + spacing)
             cell_count = linalg.Vector2f32{ linalg.ceil(min_cell_count), linalg.ceil(min_cell_count) }
         }
+        icon_history_len := int(cell_count.x) + 2
+        icon_history := make([]int, icon_history_len, context.temp_allocator)
+        for _, i in icon_history {
+            icon_history[i] = -1
+        }
+
         raylib.BeginTextureMode(render_texture)
         {
             raylib.ClearBackground({})
@@ -220,23 +226,44 @@ main :: proc() {
                     rand_sieve_gen := rand.create(rand_seed)
 
                     for y in 0..<int(cell_count.y) {
-                        current_icon := 0
                         for x in 0..<int(cell_count.x) {
-                            if input.should_randomize do current_icon = rand.int_max(icon_count, &rand_icon_gen)
+                            icons_drawn := y * int(cell_count.x) + x
+                            neighbour_top_left := icon_history[(icons_drawn + icon_history_len - int(cell_count.x) - 1) % icon_history_len]
+                            neighbour_top := icon_history[(icons_drawn + icon_history_len - int(cell_count.x)) % icon_history_len]
+                            neighbour_top_right := icon_history[(icons_drawn + icon_history_len - int(cell_count.x) + 1) % icon_history_len]
+                            neighbour_left := icon_history[(icons_drawn + icon_history_len - 1) % icon_history_len]
 
-                            if !input.should_sieve || rand.float32(&rand_sieve_gen) > input.sieve_percent {
-                                source := raylib.Rectangle{ 0.0, 0.0, f32(textures[current_icon].width), f32(textures[current_icon].height)}
+                            available_icons := make([dynamic]int, 0, 6, context.temp_allocator)
+                            for i in 0..<icon_count {
+                                if (input.should_avoid_matching_neighbours_hv) {
+                                    if ((x > 0) && (i == neighbour_left)) do continue
+                                    if (i == neighbour_top) do continue
+                                }
+                                if (input.should_avoid_matching_neighbours_diag) {
+                                    if((x > 0) && (i == neighbour_top_left)) do continue
+                                    if((x < int(cell_count.x) - 1) && (i == neighbour_top_right)) do continue
+                                }
+                                append(&available_icons, i)
+                            }
+
+                            icon_to_draw := available_icons[rand.int_max(len(available_icons), &rand_icon_gen)]
+                            sieve_value := rand.float32(&rand_sieve_gen)
+
+                            if (len(available_icons) > 0) && (!input.should_sieve || sieve_value > input.sieve_percent) {
+                                icon_history[icons_drawn % icon_history_len] = icon_to_draw
+
+                                source := raylib.Rectangle{ 0.0, 0.0, f32(textures[icon_to_draw].width), f32(textures[icon_to_draw].height)}
 
                                 rounded_tile_size := linalg.Vector2f32{ 1.0, 1.0 } * max(source.width, source.height)
 
                                 raylib.rlPushMatrix()
                                 raylib.rlTranslatef(tile_size*(rounded_tile_size.x-source.width)/rounded_tile_size.x/2.0, tile_size*(rounded_tile_size.y-source.height)/rounded_tile_size.y/2.0, 0.0)
                                 dest := raylib.Rectangle{ f32(x)*(tile_size+spacing), f32(y)*(tile_size+spacing), tile_size*source.width/rounded_tile_size.x, tile_size*source.height/rounded_tile_size.y }
-                                raylib.DrawTexturePro(textures[current_icon], source, dest, {}, 0.0, raylib.WHITE)
+                                raylib.DrawTexturePro(textures[icon_to_draw], source, dest, {}, 0.0, raylib.WHITE)
                                 raylib.rlPopMatrix()
+                            } else {
+                                icon_history[icons_drawn % icon_history_len] = -1
                             }
-
-                            if !input.should_randomize do current_icon = (current_icon + 1) % icon_count
                         }
                     }
                 }
@@ -281,6 +308,8 @@ main :: proc() {
             mu_render(ctx)
         }
         raylib.EndDrawing()
+
+        free_all(context.temp_allocator)
     }
 
     raylib.CloseWindow()
